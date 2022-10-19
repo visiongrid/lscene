@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<style>
+html, body {
+    overflow: hidden;
+}
+</style>
+</head>
+
+<body>
+
+<!--<canvas id="myCanvas" width="1200" height="900"style="border:1px solid #c3c3c3;">-->
+<canvas id="myCanvas" width="1200" height="900">
+Your browser does not support the canvas element.
+</canvas>
+
+<script>
+
+let kdNode = {
+    left: null,
+    right: null,
+    axis: 0,
+    r0: 0,
+    r1: 0,
+    rx: [],
+    ry: [],
+};
+
+
+function split(points, r0, r1, bbox, parent) {
+    if (r0 == r1)
+        return null;
+
+    let node = {};
+    node.r0 = r0;
+    node.r1 = r1;
+    node.parent = parent;
+
+
+    let xmin = points[r0].x;
+    let ymin = points[r0].y;
+    let xmax = xmin;
+    let ymax = ymin;
+    for (let i = r0; i < r1; i++) {
+        xmin = Math.min(xmin, points[i].x);
+        xmax = Math.max(xmax, points[i].x);
+
+        ymin = Math.min(ymin, points[i].y);
+        ymax = Math.max(ymax, points[i].y);
+    }
+
+    const dx = xmax - xmin;
+    const dy = ymax - ymin;
+
+    let subpoints = points.slice(r0, r1);
+
+    const rmid = Math.floor((r0 + r1) / 2);
+    if (dx > dy) {
+        node.axis = 0;
+        // points.sort(function(a,b){return a.x-b.x;});
+        subpoints.sort(function(a, b) {
+            return a.x - b.x;
+        });
+    } else {
+        node.axis = 1;
+        // points.sort(function(a,b){return a.y-b.y;});
+        subpoints.sort(function(a, b) {
+            return a.y - b.y;
+        });
+    }
+
+    for (let i = 0; i < r1 - r0; i++) {
+        points[r0 + i] = subpoints[i];
+    }
+
+
+    if (null == bbox) {
+        bbox = {};
+
+        bbox.xminmax = [xmin, xmax];
+        bbox.yminmax = [ymin, ymax];
+
+    }
+
+    node.xminmax = bbox.xminmax;
+    node.yminmax = bbox.yminmax;
+
+
+    let leftbbox = {},
+        rightbbox = {};
+    if (0 == node.axis) {
+        leftbbox.xminmax = [bbox.xminmax[0], points[rmid].x];
+        leftbbox.yminmax = [...bbox.yminmax];
+        // console.log(leftbbox);
+
+        rightbbox.xminmax = [points[rmid].x, bbox.xminmax[1]];
+        rightbbox.yminmax = [...bbox.yminmax];
+    } else {
+        leftbbox.xminmax = [...bbox.xminmax];
+        leftbbox.yminmax = [bbox.yminmax[0], points[rmid].y];
+
+        rightbbox.xminmax = [...bbox.xminmax];
+        rightbbox.yminmax = [points[rmid].y, bbox.yminmax[1]];
+    }
+
+    node.left = split(points, r0, rmid, leftbbox, node);
+    node.right = split(points, rmid + 1, r1, rightbbox, node);
+
+
+
+    return node;
+
+}
+
+function dis2(p0, p1) {
+    const dx = p0.x - p1.x;
+    const dy = p0.y - p1.y;
+
+    return dx * dx + dy * dy;
+}
+
+const intmax = 18000000
+let minl2 = intmax;
+let minnode = null;
+
+function findnearest(points, curr, pkp) {
+    if (null == curr)
+        return;
+
+    // bbox prune-----------------
+    let disx = 0.;
+    let disy = 0.;
+    if (pkp.x < curr.xminmax[0])
+        disx = curr.xminmax[0] - pkp.x;
+    if (pkp.x > curr.xminmax[1])
+        disx = curr.xminmax[1] - pkp.x;
+    if (pkp.y < curr.yminmax[0])
+        disy = curr.yminmax[0] - pkp.y;
+    if (pkp.y > curr.yminmax[1])
+        disy = curr.yminmax[1] - pkp.y;
+
+    const boxdis2 = disx * disx + disy * disy;
+    // console.log(disx, disy, boxdis2, minl2, points);
+    if (boxdis2 > minl2)
+        return;
+    // bbox prune-----------------
+
+
+    const rmid = Math.floor((curr.r0 + curr.r1) / 2);
+    const l2 = dis2(points[rmid], pkp);
+    if (l2 < minl2) {
+        minl2 = l2;
+        minnode = curr;
+        const rmid1 = Math.floor((curr.r0 + curr.r1) / 2);
+        // console.log('*', l2, rmid, '-', rmid1, curr.r0, curr.r1);
+    }
+
+
+    findnearest(points, curr.left, pkp);
+    findnearest(points, curr.right, pkp);
+}
+
+
+function knn(points, curr, pkp, k, klist) {
+    minl2 = intmax;
+    minnode = null;
+
+    findnearest(points, curr, pkp);
+
+    return minnode;
+}
+
+function getsplitlines(points, node, linevisfun) {
+    if (null === node)
+        return;
+
+    const rmid = Math.floor((node.r0 + node.r1) / 2);
+    let x0, y0, x1, y1;
+    if (1 === node.axis) {
+        x0 = node.xminmax[0];
+        x1 = node.xminmax[1];
+
+        y0 = points[rmid].y;
+        y1 = y0;
+    } else {
+        y0 = node.yminmax[0];
+        y1 = node.yminmax[1];
+
+        x0 = points[rmid].x;
+        x1 = x0;
+    }
+
+    // if (null==node.left&&null==node.right)
+    {
+        linevisfun(x0, y0, x1, y1);
+        // linevisfun(node.xminmax[0], node.yminmax[0], node.xminmax[1], node.yminmax[1]);
+    }
+    //if(null==node.parent)
+    //  return;
+
+    getsplitlines(points, node.left, linevisfun);
+    getsplitlines(points, node.right, linevisfun);
+}
+
+// ui
+let kdlinecolor =  ' #89dddd ';
+
+const canvas = document.getElementById('myCanvas');
+const ctx = canvas.getContext("2d");
+
+{
+    canvas.width = document.body.clientWidth; //document.width is obsolete
+    canvas.height = document.body.clientHeight; //document.height is obsolete
+    const canvasW = canvas.width;
+    const canvasH = canvas.height;
+}
+
+const elemLeft = canvas.offsetLeft + canvas.clientLeft;
+const elemTop = canvas.offsetTop + canvas.clientTop
+
+
+const points = [];
+let kdnode = null;
+
+function draw() {
+
+
+    const getRandomInRange = (min, max) => {
+        const rp = Math.random() * (max - min) + min;
+        // console.log(rp);
+
+        return rp;
+    };
+
+    const TOTAL_POINTS = 200;
+
+    const canvasscale = 1.;//0.8;
+    canvas_width = canvas.width * canvasscale;
+    canvas_height = canvas.height * canvasscale;
+
+    for (let i = 0; i < TOTAL_POINTS; i++) {
+        points.push({
+            x: getRandomInRange(0, canvas_width),
+            y: getRandomInRange(0, canvas_height)
+        });
+    }
+
+    const drawPoint = point => {
+        ctx.beginPath();
+        ctx.arc(point.x, point.y, 5, 0, 2 * Math.PI);
+        ctx.fill();
+    };
+
+    points.forEach(point => {
+        drawPoint(point);
+    });
+    ctx.stroke();
+
+    kdnode = split(points, 0, points.length);
+    // console.log(n);
+
+    ctx.beginPath();
+
+    if (1) {
+        getsplitlines(points, kdnode, (x0, y0, x1, y1) => {
+            ctx.moveTo(x0, y0);
+            ctx.lineTo(x1, y1);
+            // console.log(x0, y0, x1, y1);
+            // ctx.rect(x0, y0, x1, y1);
+        });
+    }
+    // getsplitlines(points, n, (x0, y0, x1, y1)=>{ctx.rect(x0, y0, x1-x0, y1-y0);});
+
+    ctx.strokeStyle = kdlinecolor;//'#ff0000';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+}
+
+draw()
+
+let prenode = null;
+
+
+canvas.addEventListener('click', function(event) {
+    var x = event.pageX - elemLeft,
+        y = event.pageY - elemTop;
+
+    if (null != prenode) {
+        // clean up
+    }
+
+    const pkp = {
+        x,
+        y
+    };
+    knn(points, kdnode, pkp);
+    prenode = minnode;
+
+    const rmid = Math.floor((prenode.r0 + prenode.r1) / 2);
+    const pt = points[rmid];
+    // console.log('---', minl2, dis2(pt, pkp), rmid);
+
+    ctx.beginPath();
+    ctx.arc(pt.x, pt.y, 6, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+
+    ctx.beginPath();
+    ctx.rect(x - 1, y - 1, 3, 3);
+    ctx.strokeStyle = '#00ff00';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+    ctx.moveTo(x, y);
+    ctx.lineTo(pt.x, pt.y);
+    ctx.strokeStyle = '#0000ff';
+    ctx.lineWidth = 1;
+    ctx.stroke();
+
+
+    return;
+    // Collision detection between clicked offset and element.
+    elements.forEach(function(element) {
+        if (y > element.top && y < element.top + element.height &&
+            x > element.left && x < element.left + element.width) {
+            alert('clicked an element');
+        }
+    });
+
+}, false);
+
+</script>
+
+</body>
+</html>
+

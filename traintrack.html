@@ -1,0 +1,590 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8" />
+<title>Add multiple geometries from one GeoJSON source</title>
+<meta name="viewport" content="initial-scale=1,maximum-scale=1,user-scalable=no" />
+<script src="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.js"></script>
+<link href="https://unpkg.com/maplibre-gl@2.4.0/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/kdbush@3.0.0/kdbush.min.js"></script>
+<script src="https://unpkg.com/rbush@3.0.1/rbush.min.js"></script>
+<script src="https://unpkg.com/rbush-knn@3.0.1/rbush-knn.min.js"></script>
+<script src="https://unpkg.com/kd-tree-javascript@1.0.3/kdTree-min.js"></script>
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+<script src="https://unpkg.com/polygon-clipping@0.15.3/dist/polygon-clipping.umd.js"></script>
+<!--<script type="text/javascript" src="https://unpkg.com/jsts@1.6.1/dist/jsts.min.js"></script>
+<script src="./offset.min.js"></script>-->
+<style>
+	body { margin: 0; padding: 0; }
+	#map { position: absolute; top: 0; bottom: 0; width: 100%; }
+</style>
+</head>
+<body>
+<div id="map"></div>
+<script>
+    var map = new maplibregl.Map({
+        container: 'map',
+        style:
+            'https://api.maptiler.com/maps/streets/style.json?key=get_your_own_OpIi9ZULNHzrESv6T2vL',
+        center: [-121.403732, 40.492392],
+        zoom: 10
+    });
+
+    let latlon = undefined;
+
+
+    let polygonfeature = {
+'type': 'Feature',
+'geometry': {
+'type': 'Polygon',
+'coordinates': [
+[
+[-121.353637, 40.584978],
+[-121.284551, 40.584758],
+[-121.275349, 40.541646],
+[-121.246768, 40.541017],
+[-121.251343, 40.423383],
+[-121.32687, 40.423768],
+[-121.360619, 40.43479],
+[-121.363694, 40.409124],
+[-121.439713, 40.409197],
+[-121.439711, 40.423791],
+[-121.572133, 40.423548],
+[-121.577415, 40.550766],
+[-121.539486, 40.558107],
+[-121.520284, 40.572459],
+[-121.487219, 40.550822],
+[-121.446951, 40.56319],
+[-121.370644, 40.563267],
+[-121.353637, 40.584978]
+]
+]
+}
+};
+
+
+    let datacell = {
+                'type': 'FeatureCollection',
+                'features': [
+
+
+                polygonfeature,
+
+
+                    {
+                        'type': 'Feature',
+                        'geometry': {
+                            'type': 'Point',
+                            'coordinates': [-121.415061, 40.506229]
+                        }
+                    },
+                    {
+                        'type': 'Feature',
+                        'geometry': {
+                            'type': 'Point',
+                            'coordinates': [-121.505184, 40.488084]
+                        }
+                    },
+                    {
+                        'type': 'Feature',
+                        'geometry': {
+                            'type': 'Point',
+                            'coordinates': [-121.354465, 40.488737]
+                        }
+                    }
+                ]
+            };
+
+            // clear feature
+            datacell.features = [];
+    
+    function loadallstation() {
+        datacell.features = [];
+        for (let i=0; i<latlon.length; i+=2)
+        {
+            datacell.features.push({
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': [latlon[i], latlon[i+1]]
+                            }
+                        })
+        }
+    }
+    // loadallstation();
+
+const station3920 = undefined;
+const statino23690 = undefined; 
+    function loadastation(stationcell, id) {
+        datacell.features = [];
+        for (let lid=0; lid<stationcell.i.length; lid++)
+        {
+            const i = stationcell.i[lid]*2;
+            datacell.features.push({
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': [latlon[i], latlon[i+1]]
+                            }
+                        })
+        }
+
+        polygonfeature.geometry.coordinates = [];
+        if (undefined!=id) {
+            const lon = latlon[id*2+0];
+            const lat = latlon[id*2+1];
+
+            let crds2 = [];
+            const offset = 0.2;
+            crds2.push([lon, lat]);
+            crds2.push([lon+offset, lat]);
+            crds2.push([lon+offset, lat+offset]);
+
+            polygonfeature.geometry.coordinates.push(crds2);
+            // console.log(crds2);
+            datacell.features.push(polygonfeature);
+        }
+    }
+    // loadastation(statino23690, 23690);
+
+    let index = undefined;
+    let points = [];
+    function buildspatialindex() {
+        console.log("index spatial")
+        for (let i=0; i<latlon.length; i+=2)
+        {
+            points.push({x:latlon[i], y:latlon[i+1]});  
+        }
+        // console.log(points);
+
+        index = new KDBush(points, p => p.x, p => p.y, 64);
+    } 
+    // buildspatialindex();
+
+
+    const rbushtol = 0.0000001;
+    const tree = new RBush();
+    function buildtree() {
+        const data = [];
+        // console.log("rbush spatial")
+        for (let i=0; i<latlon.length; i+=2)
+        {
+            data.push([latlon[i], latlon[i+1], latlon[i]+rbushtol, latlon[i+1]+rbushtol]);  
+        }
+        // console.log(points);
+
+        var richData = data.map(function (a, i) {
+            var item = arrToBox(a);
+            item.version = i + 1;
+            return item;
+        });
+        tree.load(richData);
+
+        // index = new KDBush(points, p => p.x, p => p.y, 64);
+    } 
+    
+    fetch('latlon.json')
+    .then((response) => response.json())
+    .then((json) => {
+        latlon = json;
+        buildtree();}
+        );
+
+
+    // : MapMouseEvent
+    function onMouseMove_query(e)
+    {
+        // console.log(e.point.x, e.point.y);
+        const features = map.queryRenderedFeatures(
+          [
+            [e.point.x - 10, e.point.y - 10],
+            [e.point.x + 10, e.point.y + 10],
+          ],
+          {
+            layers: ["park-volcanoes"],
+          }
+        );
+        // console.log(features);
+    }
+
+
+    function onMouseMove_range(e)
+    {
+        // console.log(e.point.x, e.point.y);
+        // console.log(e);
+        console.log(e.lngLat.lng, e.lngLat.lat);
+        const ids2 = index.within(e.lngLat.lng, e.lngLat.lat, 0.6);
+        // console.log(ids2);
+        // for (let i=0; i<ids2.length; i++){console.log(points[ids2[i]]);}
+
+        const pointmargin = [];
+        datacell.features = [];
+        for (let i=0; i<ids2.length; i++)
+        {
+            datacell.features.push({
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': [ points[ids2[i]].x, points[ids2[i]].y ]
+                            }
+                        })
+            //console.log(points[ids2[i]]);
+
+            pointmargin.push([points[ids2[i]].x, points[ids2[i]].y]);
+        }        
+
+        polygonfeature.geometry.coordinates = [];
+        polygonfeature.geometry.coordinates.push(pointmargin);
+        datacell.features.push(polygonfeature);
+
+
+        map.getSource("national-park").setData(datacell);
+    }
+
+
+
+    let nodenodelink_raw = undefined;
+    fetch('nnw.json')
+    .then((response) => response.json())
+    .then((json) => nodenodelink_raw = json);
+
+
+    const MAXDIS = 600;//KM
+    const SPEED = 120;
+    const TRANSITABLE_DISTANCE = 20; // kilometers
+    const TRANSIT_SPEED = 0.15; // kilometers per minute
+    const BUFFER_STEPS = 20
+    const SPEED_RATIO = 3;
+    
+
+function uniq_fast(a) {// https://stackoverflow.com/questions/9229645/remove-duplicate-values-from-js-array
+    var seen = {};
+    var out = [];
+    var len = a.length;
+    var j = 0;
+    for(var i = 0; i < len; i++) {
+         var item = a[i];
+         if(seen[item] !== 1) {
+               seen[item] = 1;
+               out[j++] = item;
+         }
+    }
+    return out;
+}
+
+
+function getRandom(arr, n) {
+    var result = new Array(n),
+        len = arr.length,
+        taken = new Array(len);
+    if (n > len)
+        throw new RangeError("getRandom: more elements taken than available");
+    while (n--) {
+        var x = Math.floor(Math.random() * len);
+        result[n] = arr[x in taken ? taken[x] : x];
+        taken[x] = --len in taken ? taken[len] : len;
+    }
+    return result;
+}
+
+    function iso(ids2__, dis2__) {
+        let arr = [];
+        for (let i=0; i<ids2__.length; i++)
+            arr.push(i);
+        const SAMPLECNT = 500;
+        const MINCONST = 30;
+        // console.log(SAMPLECNT, arr.length)
+        let subarr = getRandom(arr, SAMPLECNT<arr.length?SAMPLECNT:arr.length);
+
+        let ids2 = [];
+        let dis2 = [];
+        subarr.sort((l,r)=>l-r);
+        // console.log(subarr);
+        for (let i=0; i<subarr.length; i++)
+        {
+            ids2.push(ids2__[subarr[i]]);
+            dis2.push(dis2__[subarr[i]]);
+        }
+        // console.log(dis2);
+
+        let isochrones = [];
+        let isoGeometry= undefined;
+        let j = 0;
+        for (let ht=1; ht<MAXDIS/SPEED+1; ht++)
+        {
+
+            if (undefined!=isoGeometry)
+                isoGeometry = turf.buffer(isoGeometry, TRANSIT_SPEED * (MINCONST), {
+                    units: "kilometers",
+                    steps: BUFFER_STEPS,
+                });
+
+            // if (3==ht) break;
+            const bufferlist = [];
+
+            const radius = SPEED*ht;
+            for (; j<ids2.length; j++)
+            {
+                const stationdis = dis2[j];
+                if (stationdis>radius)
+                    break;
+
+                const transidis = (MAXDIS-stationdis)/SPEED * (TRANSIT_SPEED*MINCONST);
+                // console.log(stationdis, transidis);
+
+                const point = turf.point([latlon[ids2[j]*2+0], latlon[ids2[j]*2+1]]);
+                bufferlist.push(turf.buffer(point, transidis/SPEED_RATIO, {
+                units: "kilometers",
+                steps: BUFFER_STEPS,
+                }));
+            }
+
+            // console.log(j);
+
+            const fc = turf.featureCollection(bufferlist);
+            turf.simplify(fc, { tolerance: 0.005, mutate: true });
+
+
+            //------------------------
+            const geoms = []//: polygonClipping.Geom[] = [];
+            turf.geomEach(fc, (geom) => {
+                geoms.push(geom.coordinates);// as polygonClipping.Geom);
+            });
+
+            if (undefined!=isoGeometry)
+                geoms.push(isoGeometry.geometry.coordinates);// as polygonClipping.Geom);
+
+            const unioned = polygonClipping.union(geoms[0], ...geoms);
+
+            if (unioned.length === 1) {
+                isoGeometry = turf.polygon(unioned[0], { duration: ht-1 });
+            } else {
+                isoGeometry = turf.multiPolygon(unioned, { duration: ht });
+            }
+
+            turf.simplify(isoGeometry, { tolerance: 0.005, mutate: true-1 });
+
+            // trim coordinates
+            turf.coordEach(isoGeometry, (p) => {
+                p[0] = Math.round(p[0] * 1e4) / 1e4;
+                p[1] = Math.round(p[1] * 1e4) / 1e4;
+            });
+
+            isochrones.push(turf.clone(isoGeometry));
+            // break;
+            // console.log(isoGeometry)
+        }
+
+        // console.log(isochrones);
+        return isochrones;
+    }
+
+    function dij(startstationid) {
+        let nodenodelink = nodenodelink_raw[0];
+        // console.log(nodenodelink);
+        // console.log(startstationid);
+        let q = [];
+        q.push(startstationid);
+        let qw = {};
+        qw[startstationid] = 0.;
+
+        for (let i=0; i<q.length; i++)
+        {
+            const top = q[i];
+            // console.log(top, q);
+            const toplnk = nodenodelink[top];
+            for (let j=0; j<toplnk.n.length; j++)
+            {
+                const newdis = toplnk.w[j] + qw[top];
+                if (newdis>MAXDIS)
+                    continue;
+
+                if (undefined==qw[toplnk.n[j]]||qw[toplnk.n[j]]>newdis) {
+                    q.push(toplnk.n[j]);
+                    qw[toplnk.n[j]] = newdis;
+                }
+            } 
+        }
+
+        // console.log(points.length, q);
+        const tmpq = [];
+        for (let i=0; i<q.length; i++)
+        {
+            if (q[i]<latlon.length/2)
+                tmpq.push(q[i]);
+        }
+
+        const ids2 = uniq_fast(tmpq);
+        ids2.sort((ll, rr)=> qw[ll]-qw[rr])
+        const dis2 = [];
+        for (let i=0; i<ids2.length; i++)
+            dis2.push(qw[ids2[i]]);
+
+        return {ids2, dis2};
+    }
+
+    function arrToBox(arr) {
+        return {
+            minX: arr[0],
+            minY: arr[1],
+            maxX: arr[2],
+            maxY: arr[3]
+        };
+    }
+
+    function onMouseMove_knn(e)
+    {
+        const start = Date.now();
+        // console.log(e.point.x, e.point.y);
+        // console.log(e);
+        // console.log(e.lngLat.lng, e.lngLat.lat);
+        var result = knn(tree, e.lngLat.lng, e.lngLat.lat, 1);
+        // console.log(result);
+        if (result.length==0)
+            return;
+
+        const {ids2, dis2} = dij(result[0].version-1);
+        // console.log(ids2);
+
+        let addfeaturepoint = false;
+        const pointmargin = [];
+        datacell.features = [];
+        for (let i=0; i<ids2.length; i++)
+        {
+            if (addfeaturepoint)
+            datacell.features.push({
+                            'type': 'Feature',
+                            'geometry': {
+                                'type': 'Point',
+                                'coordinates': [latlon[ids2[i]*2+0], latlon[ids2[i]*2+1]]
+                            }
+                        })
+            //console.log(points[ids2[i]]);
+
+            pointmargin.push([latlon[ids2[i]*2+0], latlon[ids2[i]*2+1]]);
+                // points[ids2[i]].x, points[ids2[i]].y]);
+        }        
+
+        polygonfeature.geometry.coordinates = [];
+        polygonfeature.geometry.coordinates.push(pointmargin);
+        // datacell.features.push(polygonfeature);
+
+
+        const rlt = iso(ids2, dis2)
+        console.log(rlt.length);
+        for (let ri=0; ri<rlt.length; ri++)
+            datacell.features.push(rlt[ri]);
+
+        const delta = Date.now() - start;
+        console.log("query(ms):", delta, rlt.length);
+
+
+
+        map.getSource("national-park").setData(datacell);
+    }
+    map.on("mousemove", onMouseMove_knn);
+
+
+
+    map.on('load', function () {
+        map.addSource('national-park', {
+            'type': 'geojson',
+            'data': datacell
+        });
+
+        if (false)
+        map.addLayer({
+            'id': 'park-boundary',
+            'type': 'fill',
+            'source': 'national-park',
+            'paint': {
+            'fill-color': '#888888',
+            'fill-opacity': 0.4
+            },
+            'filter': ['==', '$type', 'Polygon']
+        });
+
+
+        map.addLayer({
+            'id': 'park-boundary',
+            'type': 'fill',
+            'source': 'national-park',
+            paint: {
+            "fill-opacity": [
+              "interpolate",
+              ["linear"],
+              ["zoom"],
+              7,
+              0.7,
+              15,
+              0.2,
+            ],
+            "fill-color": [
+              "interpolate",
+              ["linear"],
+              ["get", "duration"],
+              0,
+              "rgba(189,0,38,0.9)",
+              1,
+              "rgba(240,59,32,0.8)",
+              2,
+              "rgba(253,141,60,0.7)",
+              3,
+              "rgba(254,204,92,0.6)",
+              4,
+              "rgba(254,217,118, 0.5)",
+              5,
+              "rgba(255,255,178, 0.4)",
+            ],
+          },
+            'filter': ['==', '$type', 'Polygon']
+        });
+
+
+        map.addLayer(
+        {
+          id: "isochrones-outline",
+          type: "line",
+          source: "national-park",
+          layout: {},
+          paint: {
+            "line-color": [
+              "interpolate",
+              ["linear"],
+              ["get", "duration"],
+              0,
+              "rgba(189,0,38,0.8)",
+              1,
+              "rgba(240,59,32,0.8)",
+              2,
+              "rgba(253,141,60,0.8)",
+              3,
+              "rgba(254,204,92,0.8)",
+              4,
+              "rgba(254,217,118,0.8)",
+              5,
+              "rgba(224, 116, 38,0.9)",
+            ],
+            "line-width": 1.5,
+          },
+        });
+
+
+        map.addLayer({
+            'id': 'park-volcanoes',
+            'type': 'circle',
+            'source': 'national-park',
+            'paint': {
+                'circle-radius': 3,
+                'circle-color': '#B42222',
+                /*"circle-opacity": 0,*/
+                /*"circle-stroke-width": 1,*/
+                /*"circle-stroke-color": '#000'//'#B42222'*/
+            },
+            'filter': ['==', '$type', 'Point']
+        });
+    });
+</script>
+
+</body>
+</html>
